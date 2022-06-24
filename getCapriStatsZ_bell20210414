@@ -1,0 +1,447 @@
+#!/usr/bin/env python3
+
+# PDB contact utility
+# Charles Christoffer (christ35@purdue.edu)
+
+import argparse
+import sys
+import os
+import itertools
+import math
+from Bio.PDB import *
+from numpy import *
+from scipy.spatial import cKDTree
+from Bio import BiopythonWarning
+import warnings
+
+sys.path.append(os.path.expanduser("~christ35/bin"))
+sys.path.append(os.path.expanduser("~christ35/libraries"))
+
+NUCLEIC_BACKBONE = ["C1'", "C2'", "C3'", "C4'", "C5'", "O3'", "O4'", "O5'", "OP1", "OP2", "P"]
+PROTEIN_BACKBONE = ["N", "CA", "C", "O"]
+EITHER_BACKBONE = PROTEIN_BACKBONE + NUCLEIC_BACKBONE
+
+class RMSDUtility(object):
+	"""
+	RMSD Utility
+	"""
+	
+	CAPRI_CONTACT_THRESHOLD = 5.0
+	CAPRI_INTERFACE_THRESHOLD = 10.0
+	
+	#@classmethod
+	#def statsToQuality(cls, fnat, irmsd, lrmsd):
+	#	if fnat >= 0.5 and (lrmsd <= 1.0 or irmsd <= 1.0):
+	#		return "high"
+	#	elif (fnat >= 0.1 and fnat < 0.5) and (lrmsd <= 5.0 or irmsd <= 2.0):
+	#		return "medium"
+	#	elif fnat >= 0.5 and lrmsd > 1.0 and irmsd > 1.0:
+	#		return "medium"
+	#	elif (fnat >= 0.1 and fnat < 0.3) and (lrmsd <= 10.0 or irmsd <= 4.0):
+	#		return "acceptable"
+	#	elif fnat >= 0.3 and lrmsd > 5.0 and irmsd > 2.0:
+	#		return "acceptable"
+	#	elif fnat < 0.1 or (lrmsd > 1.0 and irmsd <= 4.0):
+	#		return "incorrect"
+	#	else:
+	#		return "???"
+
+	@classmethod
+	def statsToQuality(cls, fnat, irmsd, lrmsd):
+		if fnat >= 0.5 and (lrmsd <= 1.0 or irmsd <= 1.0):
+			return "high"
+		elif (fnat >= 0.3) and (lrmsd <= 5.0 or irmsd <= 2.0):
+			return "medium"
+		elif (fnat >= 0.1) and (lrmsd <= 10.0 or irmsd <= 4.0):
+			return "acceptable"
+		elif fnat < 0.1 or (lrmsd > 10.0 and irmsd > 4.0):
+			return "incorrect"
+		else:
+			return "???"
+
+	@classmethod
+	def getStaticRMSD(cls, a, b):
+		dev = []
+		for i in range(len(a)):
+			dev.append(linalg.norm(a[i]-b[i]))
+		dev = [x*x for x in dev]
+		return math.sqrt(float(sum(dev))/float(len(dev)))
+
+	@classmethod
+	def getContacts(cls, r, l):
+		# returns residue ids of contact residues according to CAPRI 5\AA critera
+		rpts = []
+		lpts = []
+		rptsidx = []
+		lptsidx = []
+		
+		if not isinstance(r, list):
+			r = [r]
+		if not isinstance(l, list):
+			l = [l]
+
+		for atom in itertools.chain.from_iterable([x.get_atoms() for x in r]):
+			if atom.element == "H":
+				continue
+			rpts.append(tuple(atom.get_vector()))
+			rptsidx.append(atom)
+
+		for atom in itertools.chain.from_iterable([x.get_atoms() for x in l]):
+			if atom.element == "H":
+				continue
+			lpts.append(tuple(atom.get_vector()))
+			lptsidx.append(atom)
+
+		rkdtree = cKDTree(rpts)
+		lkdtree = cKDTree(lpts)
+		result = lkdtree.query_ball_tree(rkdtree, RMSDUtility.CAPRI_CONTACT_THRESHOLD)
+		rcontacts = set()
+		lcontacts = set()
+		pairs = set()
+		for i in range(len(lpts)):
+			if len(result[i]) > 0:
+				lcontacts.add(lptsidx[i].get_parent())
+			for rp in result[i]:
+				rcontacts.add(rptsidx[rp].get_parent())
+
+				pairs.add((rptsidx[rp].get_parent(), lptsidx[i].get_parent()))
+		
+		rcontacts = sorted(rcontacts)
+		lcontacts = sorted(lcontacts)
+		pairs = sorted(pairs)
+
+		#print "rcontacts"
+		#print rcontacts
+		#print "lcontacts"
+		#print lcontacts
+
+		return (rcontacts, lcontacts, pairs)
+
+	@classmethod
+	def getInterface(cls, r, l):
+		# returns residue ids of contact residues according to CAPRI 5\AA critera
+		rpts = []
+		lpts = []
+		rptsidx = []
+		lptsidx = []
+		
+		if not isinstance(r, list):
+			r = [r]
+		if not isinstance(l, list):
+			l = [l]
+
+		for atom in itertools.chain.from_iterable([x.get_atoms() for x in r]):
+			if atom.element == "H":
+				continue
+			rpts.append(tuple(atom.get_vector()))
+			rptsidx.append(atom)
+
+		for atom in itertools.chain.from_iterable([x.get_atoms() for x in l]):
+			if atom.element == "H":
+				continue
+			lpts.append(tuple(atom.get_vector()))
+			lptsidx.append(atom)
+
+		rkdtree = cKDTree(rpts)
+		lkdtree = cKDTree(lpts)
+		result = lkdtree.query_ball_tree(rkdtree, RMSDUtility.CAPRI_INTERFACE_THRESHOLD)
+		rcontacts = set()
+		lcontacts = set()
+		pairs = set()
+		for i in range(len(lpts)):
+			if len(result[i]) > 0:
+				lcontacts.add(lptsidx[i].get_parent())
+			for rp in result[i]:
+				rcontacts.add(rptsidx[rp].get_parent())
+
+				pairs.add((rptsidx[rp].get_parent(), lptsidx[i].get_parent()))
+		
+		rcontacts = sorted(rcontacts)
+		lcontacts = sorted(lcontacts)
+		pairs = sorted(pairs)
+
+		#print "rcontacts"
+		#print rcontacts
+		#print "lcontacts"
+		#print lcontacts
+
+		return (rcontacts, lcontacts, pairs)
+
+	def __init__(self, reference, infile=sys.stdin, rchain="A", lchain="B", mrchain="A", mlchain="B", silence=False, allrec=False):
+
+		if silence:
+			warnings.simplefilter('ignore', BiopythonWarning)
+
+		parser = PDBParser()
+		
+		refStruct = parser.get_structure(reference, reference)
+		refModel = refStruct[0]
+		if not allrec:
+			refR = refModel[rchain]
+		refL = refModel[lchain]
+		
+		ref_chainids = list(sorted([x.get_id() for x in refModel.get_chains()]))
+		print(ref_chainids)
+		ref_chainids_nonrec = [x for x in ref_chainids if x != lchain]
+		refR_many = [refModel[x] for x in ref_chainids_nonrec]
+
+		#(rContacts, lContacts, refPairs) = RMSDUtility.getContacts(refStruct[0][rchain], refStruct[0][lchain])
+		if allrec:
+			(rContacts, lContacts, refPairs) = RMSDUtility.getContacts([refStruct[0][x] for x in ref_chainids_nonrec], refStruct[0][lchain])
+		else:
+			(rContacts, lContacts, refPairs) = RMSDUtility.getContacts(refStruct[0][rchain], refStruct[0][lchain])
+		#(xxrContacts, xxlContacts, xxrefPairs) = RMSDUtility.getInterface(refStruct[0][rchain], refStruct[0][lchain])
+		if allrec:
+			(xxrContacts, xxlContacts, xxrefPairs) = RMSDUtility.getInterface([refStruct[0][x] for x in ref_chainids_nonrec], refStruct[0][lchain])
+		else:
+			(xxrContacts, xxlContacts, xxrefPairs) = RMSDUtility.getInterface(refStruct[0][rchain], refStruct[0][lchain])
+
+		#BACKBONE = ["CA", "C", "N", "O"]
+		BACKBONE = EITHER_BACKBONE
+
+		refIfaceAtoms = []
+		for aid in rContacts:
+			#res = refR[aid.get_id()]
+			res = refModel[aid.get_parent().get_id()][aid.get_id()]
+			for e in BACKBONE:
+				if e in res:
+					refIfaceAtoms.append(res[e])
+		for aid in lContacts:
+			#res = refL[aid.get_id()]
+			res = refModel[aid.get_parent().get_id()][aid.get_id()]
+			for e in BACKBONE:
+				if e in res:
+					refIfaceAtoms.append(res[e])
+		
+		print(set(x.get_parent().get_parent().get_id() for x in refIfaceAtoms))
+
+		refRAtoms = []
+		refLAtoms = []
+
+		if allrec:
+			for atom in itertools.chain.from_iterable(recchain.get_atoms() for recchain in refR_many):
+				if atom.get_id() in BACKBONE:
+					refRAtoms.append(atom)
+		else:
+			for atom in refR.get_atoms():
+				if atom.get_id() in BACKBONE:
+					refRAtoms.append(atom)
+
+		for atom in refL.get_atoms():
+			if atom.get_id() in BACKBONE:
+				refLAtoms.append(atom)
+		refAtoms = refRAtoms + refLAtoms
+
+
+		xxrefIfaceAtoms = []
+		for aid in xxrContacts:
+			#res = refR[aid.get_id()]
+			res = refModel[aid.get_parent().get_id()][aid.get_id()]
+			for e in BACKBONE:
+				if e in res:
+					xxrefIfaceAtoms.append(res[e])
+		for aid in xxlContacts:
+			#res = refL[aid.get_id()]
+			res = refModel[aid.get_parent().get_id()][aid.get_id()]
+			for e in BACKBONE:
+				if e in res:
+					xxrefIfaceAtoms.append(res[e])
+		
+		superimposer = Superimposer()
+
+		print("file,model,fnat,irmsd,lrmsd,capri_quality")
+
+		for filename in infile:
+			f = filename.strip()
+			structure = parser.get_structure(f, f)
+			
+			for model in structure:
+				try:
+					lpts = []
+					lptsidx = []
+					rpts = []
+					rptsidx = []
+					modIfaceAtoms = []
+					if mrchain in model:
+						modR = model[mrchain]
+					elif not allrec:
+						# assume ref receptor is also model receptor
+						modR = refR.copy()
+					modL = model[mlchain]
+					if allrec:
+						modL_many = [model[x] for x in ref_chainids_nonrec]
+					#(modRContacts, modLContacts, modPairs) = RMSDUtility.getContacts(modR, modL)
+
+					#for aid in rContacts:
+					if allrec:
+						for aid in xxrContacts:
+							for e in BACKBONE:
+								if aid.get_id() in model[aid.get_parent().get_id()] and e in model[aid.get_parent().get_id()][aid.get_id()]:
+									modIfaceAtoms.append(model[aid.get_parent().get_id()][aid.get_id()][e])
+					else:
+						for aid in xxrContacts:
+							for e in BACKBONE:
+								if aid.get_id() in modR and e in modR[aid.get_id()]:
+									modIfaceAtoms.append(modR[aid.get_id()][e])
+					#for aid in lContacts:
+					for aid in xxlContacts:
+						for e in BACKBONE:
+							if aid.get_id() in modL and e in modL[aid.get_id()]:
+								modIfaceAtoms.append(modL[aid.get_id()][e])
+
+					#print "!\t%d\t%d" % (len(refIfaceAtoms), len(modIfaceAtoms))
+					
+					#superimposer.set_atoms(refIfaceAtoms, modIfaceAtoms)
+					if allrec:
+						temp_xxrefIfaceAtoms = [(x.get_parent().get_parent().get_id(), x.get_parent().get_id(), x.get_id())  for x in xxrefIfaceAtoms]
+						temp_modIfaceAtoms   = [(x.get_parent().get_parent().get_id(), x.get_parent().get_id(), x.get_id()) for x in modIfaceAtoms]
+					else:
+						temp_xxrefIfaceAtoms = [(x.get_parent().get_parent().get_id() == rchain, x.get_parent().get_id(), x.get_id())  for x in xxrefIfaceAtoms]
+						temp_modIfaceAtoms   = [(x.get_parent().get_parent().get_id() == mrchain, x.get_parent().get_id(), x.get_id()) for x in modIfaceAtoms]
+
+					#common_res = set([x.get_parent().get_id() for x in modIfaceAtoms]) & set([x.get_parent().get_id() for x in xxrefIfaceAtoms])
+					common_res = set(temp_xxrefIfaceAtoms) & set(temp_modIfaceAtoms)
+					
+					if allrec:
+						alist1 = [a for a in xxrefIfaceAtoms if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+						alist2 = [a for a in modIfaceAtoms   if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+					else:
+						alist1 = [a for a in xxrefIfaceAtoms if ((a.get_parent().get_parent().get_id() == rchain,  a.get_parent().get_id(), a.get_id()) in common_res)]
+						alist2 = [a for a in modIfaceAtoms   if ((a.get_parent().get_parent().get_id() == mrchain, a.get_parent().get_id(), a.get_id()) in common_res)]
+					superimposer.set_atoms(alist1, alist2)
+					#print "IRMSD = %f" % (superimposer.rms)
+					irmsd = superimposer.rms
+
+					Nc = len(refPairs)
+					nc = 0
+					for pair in refPairs:
+						breakflag = False
+						#if pair[0].get_id() in modR:
+						if pair[0].get_id() in model[pair[0].get_parent().get_id()]:
+							for ratom in model[pair[0].get_parent().get_id()][pair[0].get_id()]:
+								if breakflag:
+									break
+								if ratom.element == "H":
+									continue
+								#if pair[1].get_id() in modL:
+								if pair[1].get_id() in model[pair[1].get_parent().get_id()]:
+									for latom in model[pair[1].get_parent().get_id()][pair[1].get_id()]:
+										if breakflag:
+											break
+										if latom.element == "H":
+											continue
+										rvec = ratom.get_vector()
+										lvec = latom.get_vector()
+										d = linalg.norm(rvec - lvec)
+										if d <= RMSDUtility.CAPRI_CONTACT_THRESHOLD:
+											nc += 1
+											breakflag = True
+											break
+
+					fnat = float(nc)/float(Nc)
+					#print "NC = %d" % Nc
+					#print "nc = %d" % nc
+					#print "FNAT = %f" % fnat
+
+					
+					modRAtoms = []
+					modLAtoms = []
+					if allrec:
+						for atom in itertools.chain.from_iterable(recchain.get_atoms() for recchain in [model[x] for x in ref_chainids_nonrec]):
+							if atom.get_id() in BACKBONE:
+								modRAtoms.append(atom)
+					else:
+						for atom in modR.get_atoms():
+							if atom.get_id() in BACKBONE:
+								modRAtoms.append(atom)
+					for atom in modL.get_atoms():
+						if atom.get_id() in BACKBONE:
+							modLAtoms.append(atom)
+					modAtoms = modRAtoms + modLAtoms
+					#print len(modRAtoms)
+					#print len(modLAtoms)
+					#print len(refRAtoms)
+					#print len(refLAtoms)
+
+					xrefRAtoms = refRAtoms
+					xrefLAtoms = refLAtoms
+					xmodRAtoms = modRAtoms
+					xmodLAtoms = modLAtoms
+					
+				
+
+	
+					xrefAtoms = xrefRAtoms + xrefLAtoms
+					xmodAtoms = xmodRAtoms + xmodLAtoms
+					
+					if allrec:					
+						temp_ref = [(x.get_parent().get_parent().get_id(), x.get_parent().get_id(), x.get_id()) for x in xrefAtoms]
+						temp_mod = [(x.get_parent().get_parent().get_id(), x.get_parent().get_id(), x.get_id()) for x in xmodAtoms]
+					else:
+						temp_ref = [(x.get_parent().get_parent().get_id() ==  rchain, x.get_parent().get_id(), x.get_id()) for x in xrefAtoms]
+						temp_mod = [(x.get_parent().get_parent().get_id() == mrchain, x.get_parent().get_id(), x.get_id()) for x in xmodAtoms]
+					common_res = set(temp_ref) & set(temp_mod)
+
+
+					#common_res = set([x.get_parent().get_id() for x in xrefRAtoms]) & set([x.get_parent().get_id() for x in xmodRAtoms])
+					#[a for a in xxrefIfaceAtoms if (a.get_parent().get_id() in common_res)]	
+					if allrec:
+						xrefRAtoms = [a for a in xrefRAtoms if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+						xmodRAtoms = [a for a in xmodRAtoms if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+					else:
+						xrefRAtoms = [a for a in xrefRAtoms if ((a.get_parent().get_parent().get_id() ==  rchain, a.get_parent().get_id(), a.get_id()) in common_res)]
+						xmodRAtoms = [a for a in xmodRAtoms if ((a.get_parent().get_parent().get_id() == mrchain, a.get_parent().get_id(), a.get_id()) in common_res)]
+					superimposer.set_atoms(xrefRAtoms, xmodRAtoms)
+					superimposer.apply(xmodLAtoms)
+					
+					#common_res = set([x.get_parent().get_id() for x in xrefLAtoms]) & set([x.get_parent().get_id() for x in xmodLAtoms])
+					if allrec:
+						xrefLAtoms = [a for a in xrefLAtoms if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+						xmodLAtoms = [a for a in xmodLAtoms if ((a.get_parent().get_parent().get_id(), a.get_parent().get_id(), a.get_id()) in common_res)]
+					else:				
+						xrefLAtoms = [a for a in xrefLAtoms if ((a.get_parent().get_parent().get_id() ==  rchain, a.get_parent().get_id(), a.get_id()) in common_res)]
+						xmodLAtoms = [a for a in xmodLAtoms if ((a.get_parent().get_parent().get_id() == mrchain, a.get_parent().get_id(), a.get_id()) in common_res)]
+					
+					lrmsd = RMSDUtility.getStaticRMSD(xrefLAtoms, xmodLAtoms)
+					#file,model,fnat,irmsd,lrmsd,capri_quality
+					print("%s,%d,%f,%f,%f,%s" % (f, model.get_id(), fnat, irmsd, lrmsd, RMSDUtility.statsToQuality(fnat, irmsd, lrmsd)), flush=True)
+				except Exception as e:
+					print("%s,%d,%f,%f,%f,%s" % (f, model.get_id(), -1, -1, -1, "error"), flush=True)
+					print(e, file=sys.stderr)
+
+				
+	@classmethod
+	def commandline(cls, module_args=None):
+		desc = "Utility for computing CAPRI criteria stats"
+		a = argparse.ArgumentParser(description=desc)
+		a.add_argument("reference",
+			help="Reference structure for aligning to, interface extraction, etc.")
+		a.add_argument("-i", "--infile",
+			help="File listing input PDB files (defaults to stdin)",
+			type=argparse.FileType("r"),
+			default=sys.stdin)
+		a.add_argument("--rchain",
+			help="Chain ID of the receptor chain in the reference",
+			default="A")
+		a.add_argument("--lchain",
+			help="Chain ID of the ligand chain in the reference",
+			default="B")
+		a.add_argument("--mrchain",
+			help="Chain ID of the receptor chain in the models",
+			default="A")
+		a.add_argument("--mlchain",
+			help="Chain ID of the ligand chain in the models",
+			default="B")
+		a.add_argument("--silence",
+			help="Silences BioPython warnings and atom mismatch warnings",
+			action="store_true")
+		a.add_argument("--allrec",
+			help="Sets all nonligand chains to be considered the receptor",
+			action="store_true")
+
+		kwargs = vars(a.parse_args(module_args))
+		c = cls(**kwargs)
+		return c
+
+if __name__ == "__main__":
+	RMSDUtility.commandline()
